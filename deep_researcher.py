@@ -1,5 +1,6 @@
 import json
 import logging
+from langchain_core.callbacks import BaseCallbackHandler
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -28,6 +29,59 @@ logger = logging.getLogger("deep_researcher")
 
 tavily = TavilyClient()
 app = FastAPI(title="Deep Research Multi-Agent API", version="1.0")
+
+
+class ResearchAgentLogger(BaseCallbackHandler):
+
+    def on_tool_start(
+        self,
+        serialized,
+        input_str,
+        run_id,
+        parent_run_id=None,
+        **kwargs
+    ):
+        tool_name = serialized.get("name", "unknown_tool")
+
+        logger.info(
+            "[TOOL START] name=%s input=%s parent_run_id=%s",
+            tool_name,
+            input_str,
+            parent_run_id
+        )
+
+        # DeepAgents commonly dispatches subagents through a task tool.
+        if tool_name == "task":
+            logger.info(
+                "[SUBAGENT DISPATCH] Task tool invoked: %s",
+                input_str
+            )
+
+    def on_tool_end(
+        self,
+        output,
+        run_id,
+        parent_run_id=None,
+        **kwargs
+    ):
+        logger.info(
+            "[TOOL END] run_id=%s parent_run_id=%s",
+            run_id,
+            parent_run_id
+        )
+
+    def on_tool_error(
+        self,
+        error,
+        run_id,
+        parent_run_id=None,
+        **kwargs
+    ):
+        logger.exception(
+            "[TOOL ERROR] run_id=%s error=%s",
+            run_id,
+            error
+        )
 
 
 class Output(BaseModel):
@@ -83,7 +137,11 @@ async def deep_search(input_: Input):
             "messages": [
                 {"role": "user", "content": input_.query}
             ]
-        })
+        },
+            config={
+                "callbacks": [ResearchAgentLogger()]
+            }
+        )
 
         raw_content = response["messages"][-1].content
         logger.info(
